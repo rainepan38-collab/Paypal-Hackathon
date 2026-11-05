@@ -1,0 +1,14 @@
+{
+  "name": "SplitMate — chat, split, settle",
+  "short_name": "SplitMate",
+  "description": "A mobile-first group chat with AI bill splitting and PayPal Sandbox payments",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f3",
+  "theme_color": "#0c795d",
+  "icons": [
+    {"src":"/assets/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/assets/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
