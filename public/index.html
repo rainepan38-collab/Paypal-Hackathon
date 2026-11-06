@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/assets/app.css"/>
   <title>SplitMate — chat, split, settle</title>
 </head>
-<body>
+<body class="session-loading">
   <div class="shell" id="shell">
     <aside class="sidebar" aria-label="Conversations">
       <div class="side-brand">
@@ -22,9 +22,9 @@
         <span class="beta-pill">BETA</span>
       </div>
       <div class="side-controls">
-        <div class="eyebrow">DEMO ACCOUNT</div>
-        <div class="person-select-wrap"><div class="person-mini-avatar" id="personAvatar">Y</div><select id="actorSelect" aria-label="Switch demo account"><option>You</option><option>Alex</option><option>Sarah</option></select><span aria-hidden="true">⌄</span></div>
-        <div class="tiny-hint">Switch people to simulate a real group chat.</div>
+        <div class="eyebrow">SIGNED IN</div>
+        <div class="person-select-wrap"><div class="person-mini-avatar" id="personAvatar"></div><strong id="accountName"></strong><button id="logoutBtn" class="logout-btn" type="button">Switch / sign out</button></div>
+        <div class="tiny-hint">Account switching requires a password.</div>
       </div>
       <div class="side-title"><h2>Messages</h2><span class="side-counter">2 chats</span></div>
       <div class="thread-list" id="threadList"></div>
@@ -38,8 +38,8 @@
       <header class="chat-header">
         <button class="icon-btn mobile-back" id="backBtn" aria-label="Back to chats">‹</button>
         <div class="group-avatar" id="headerAvatar">🍽️</div>
-        <div class="group-meta"><h1 id="headerTitle">Weekend crew</h1><p id="headerSub">You, Alex and Sarah</p></div>
-        <div class="header-actions"><span class="secure-label"><span class="green-dot"></span> Demo chat</span><button class="icon-btn" id="infoBtn" aria-label="How this works" title="How this works">ⓘ</button></div>
+        <div class="group-meta"><h1 id="headerTitle">Weekend crew</h1><p id="headerSub">Jimmy, Alex and Sarah</p></div>
+        <div class="header-actions"><span class="signed-user" title="Current account"><span id="headerUserAvatar" class="signed-user-avatar"></span><span id="headerUserName"></span></span><button class="icon-btn" id="infoBtn" aria-label="How this works" title="How this works">ⓘ</button></div>
       </header>
       <div class="chat-notice" id="chatNotice"><span>🛡</span> Sandbox only. Checkout sends test payments to your PayPal sandbox business account — not directly to friends.</div>
       <div class="messages" id="messages" aria-live="polite"><div class="loading-chat">Loading your conversation…</div></div>
@@ -55,19 +55,17 @@
     </main>
     <aside class="inspector" aria-label="Group information">
       <div class="inspector-title">Group details</div>
-      <div class="group-hero"><div class="group-hero-icon" id="detailAvatar">🍽️</div><h3 id="detailTitle">Weekend crew</h3><p>Private group · Demo environment</p></div>
+      <div class="group-hero"><div class="group-hero-icon" id="detailAvatar">🍽️</div><h3 id="detailTitle">Weekend crew</h3><p>Private group · Sandbox environment</p></div>
       <div class="inspector-sep"></div>
-      <div class="inspector-heading">GROUP MEMBERS <span>3</span></div>
-      <div class="member"><div class="member-ava you">Y</div><div><strong>You</strong><small>Organizer</small></div><span class="online"></span></div>
-      <div class="member"><div class="member-ava alex">A</div><div><strong>Alex</strong><small>Participant</small></div></div>
-      <div class="member"><div class="member-ava sarah">S</div><div><strong>Sarah</strong><small>Participant</small></div></div>
+      <div class="inspector-heading">GROUP MEMBERS <span id="memberCount">3</span></div>
+      <div id="groupMembers"></div>
       <div class="inspector-sep"></div>
       <div class="inspector-heading">EXPENSE SUMMARY</div>
       <div class="summary-card"><div class="summary-title">Latest confirmed split</div><div id="summaryContent"><p>No expenses yet. Ask SplitMate to split one!</p></div></div>
       <div class="trust-note"><div>🔒</div><p><b>Always in control</b><br/>AI proposes expenses. A human must confirm before creating requests.</p></div>
     </aside>
   </div>
-  <dialog id="infoDialog"><div class="modal-content"><button class="close-modal" id="closeInfo" aria-label="Close">✕</button><div class="modal-icon">✦</div><h2>Welcome to SplitMate</h2><p>A mobile-friendly group chat for your PayPal AI Hackathon demonstration. No WhatsApp or Meta account required.</p><ol><li>Chat with your group or switch demo participants.</li><li>Send <strong>@SplitMate I paid $96 for dinner with Alex and Sarah. Split equally.</strong></li><li>Confirm the proposed split to get a payment card for each person.</li><li>Open a card and pay using a <strong>PayPal Sandbox Personal</strong> test account.</li><li>Return to the chat to see payment status update automatically.</li></ol><div class="modal-warning">PayPal Sandbox transfers test funds to the configured sandbox merchant, not to a real friend. This is a demo, not a P2P payment service.</div><button class="modal-primary" id="gotIt">Got it</button></div></dialog>
+  <dialog id="infoDialog"><div class="modal-content"><button class="close-modal" id="closeInfo" aria-label="Close">✕</button><div class="modal-icon">✦</div><h2>Welcome to SplitMate</h2><p>A mobile-friendly group chat for your PayPal AI Hackathon demonstration. No WhatsApp or Meta account required.</p><ol><li>Sign in with your own password and chat with your group.</li><li>Send <strong>@SplitMate I paid $96 for dinner with Alex and Sarah. Split equally.</strong></li><li>Confirm the proposed split to get a payment card for each person.</li><li>Open a card and pay using a <strong>PayPal Sandbox Personal</strong> test account.</li><li>Return to the chat to see payment status update automatically.</li></ol><div class="modal-warning">PayPal Sandbox transfers test funds to the configured sandbox merchant, not to a real friend. This is a demo, not a P2P payment service.</div><button class="modal-primary" id="gotIt">Got it</button></div></dialog>
   <div class="toast" id="toast" role="status"></div>
   <script defer src="/assets/app.js"></script>
 </body>
