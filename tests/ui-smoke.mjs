@@ -1,0 +1,100 @@
+// Optional browser check. Uses only generated passwords, an in-memory DB and the local parser.
+// PLAYWRIGHT_MODULE=/tmp/splitmate-ui-tools/node_modules/playwright/index.mjs node tests/ui-smoke.mjs
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+Object.assign(process.env,{NODE_ENV:'test',DB_PATH:':memory:',DOTENV_CONFIG_QUIET:'true',SESSION_SECRET:randomBytes(48).toString('hex'),SESSION_TTL_HOURS:'8',GEMINI_API_KEY:'',PAYPAL_CLIENT_ID:'',PAYPAL_CLIENT_SECRET:'',PUBLIC_BASE_URL:''});
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { app } = await import('../src/server.js');
+const { db } = await import('../src/db.js');
+const { setPassword } = await import('../src/auth.js');
+const passwords=Object.fromEntries(['Jimmy','Alex','Sarah'].map(name=>[name,randomBytes(24).toString('base64url')]));
+for(const [name,password] of Object.entries(passwords))await setPassword(`user-${name.toLowerCase()}`,password);
+const server=app.listen(0,'127.0.0.1');await once(server,'listening');
+const base=`http://127.0.0.1:${server.address().port}`;
+const directory=mkdtempSync(join(tmpdir(),'splitmate-ui-'));
+let browser;
+try{
+  browser=await chromium.launch(process.env.CHROME_PATH?{headless:true,executablePath:process.env.CHROME_PATH}:{headless:true,channel:'chrome'});
+  const errors=[];
+  async function pageFor(viewport={width:1440,height:1000}){
+    const context=await browser.newContext({viewport});
+    await context.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
+    const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
+    return page;
+  }
+  async function login(page,name,password=passwords[name]){
+    await page.goto(base);
+    await page.getByLabel('Username',{exact:true}).fill(name);
+    await page.getByLabel('Password',{exact:true}).fill(password);
+    await page.getByRole('button',{name:'Sign in',exact:false}).click();
+    await page.waitForURL(base+'/');
+    await page.locator('#accountName').getByText(name,{exact:true}).waitFor();
+  }
+  const jimmy=await pageFor();await jimmy.goto(base);
+  await jimmy.getByRole('heading',{name:'Welcome back'}).waitFor();
+  await jimmy.screenshot({path:join(directory,'login-desktop.png')});
+  const mobile=await pageFor({width:390,height:844});await mobile.goto(base);
+  await mobile.getByRole('heading',{name:'Welcome back'}).waitFor();
+  assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await mobile.screenshot({path:join(directory,'login-mobile.png')});
+  await login(jimmy,'Jimmy');
+  assert.equal(await jimmy.locator('#actorSelect').count(),0);
+  assert.equal(await jimmy.locator('#groupMembers strong').allTextContents().then(names=>names.join(',')),'Jimmy,Alex,Sarah');
+  await jimmy.getByRole('button',{name:'Try AI bill split',exact:false}).click();
+  assert.match(await jimmy.locator('#composer').inputValue(),/with Alex and Sarah/);
+  await jimmy.getByRole('button',{name:'Send message',exact:true}).click();
+  await jimmy.getByRole('button',{name:'Confirm & create requests',exact:true}).waitFor();
+  await jimmy.waitForFunction(()=>!document.querySelector('.card-action').disabled);
+  assert.ok(await jimmy.getByRole('button',{name:'Confirm & create requests',exact:true}).isEnabled());
+  await jimmy.screenshot({path:join(directory,'chat-desktop.png')});
+  const alex=await pageFor();await login(alex,'Alex');
+  assert.equal(await alex.getByRole('button',{name:'Only Jimmy can confirm'}).isEnabled(),false);
+  await alex.evaluate(()=>localStorage.setItem('splitmate-demo-person','Jimmy'));await alex.reload();
+  await alex.locator('#accountName').getByText('Alex',{exact:true}).waitFor();
+  await alex.locator('#composer').fill('@SplitMate I paid $32 for dinner with Jimmy and Sarah. Split equally.');
+  await alex.getByRole('button',{name:'Send message',exact:true}).click();
+  const alexConfirm=alex.getByRole('button',{name:'Confirm & create requests',exact:true});
+  await alexConfirm.waitFor();await alex.waitForFunction(()=>[...document.querySelectorAll('.card-action')].some(button=>button.textContent==='Confirm & create requests'&&!button.disabled));
+  await alexConfirm.click();
+  await alex.getByText('Jimmy',{exact:true}).count();
+  await alex.locator('.share-amount').getByText('$10.67',{exact:true}).waitFor();
+  await alex.locator('.share-amount').getByText('$10.66',{exact:true}).waitFor();
+  await login(mobile,'Sarah');
+  await mobile.getByRole('button',{name:'Open Weekend crew',exact:true}).click();
+  await mobile.locator('#composer').fill('@SplitMate I paid $60 for groceries with Jimmy and Alex. Split equally.');
+  await mobile.getByRole('button',{name:'Send message',exact:true}).click();
+  const sarahConfirm=mobile.getByRole('button',{name:'Confirm & create requests',exact:true});
+  await sarahConfirm.waitFor();await mobile.waitForFunction(()=>[...document.querySelectorAll('.card-action')].some(button=>button.textContent==='Confirm & create requests'&&!button.disabled));
+  await sarahConfirm.click();
+  await mobile.getByText('groceries',{exact:true}).count();
+  assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await mobile.screenshot({path:join(directory,'chat-mobile.png')});
+  await jimmy.getByRole('button',{name:'Confirm & create requests',exact:true}).click();
+  await jimmy.getByRole('button',{name:'Switch / sign out',exact:true}).click();
+  await jimmy.waitForURL(base+'/login');
+  await jimmy.getByLabel('Username',{exact:true}).fill('Alex');
+  await jimmy.getByLabel('Password',{exact:true}).fill(passwords.Jimmy);
+  await jimmy.getByRole('button',{name:'Sign in',exact:false}).click();
+  await jimmy.getByText('Invalid username or password.',{exact:true}).waitFor();
+  await jimmy.getByLabel('Password',{exact:true}).fill(passwords.Alex);
+  await jimmy.getByRole('button',{name:'Sign in',exact:false}).click();
+  await jimmy.waitForURL(base+'/');await jimmy.locator('#accountName').getByText('Alex',{exact:true}).waitFor();
+  const share=db.prepare("SELECT s.token FROM shares s JOIN expenses e ON e.id=s.expense_id WHERE e.organizer_user_id='user-jimmy' AND s.person_user_id='user-alex'").get();
+  await alex.goto(base+`/pay/${share.token}`);
+  await alex.locator('#account').getByText('Alex',{exact:true}).waitFor();
+  await alex.locator('#organizer').getByText('Jimmy',{exact:true}).waitFor();
+  await alex.locator('#person').getByText('Alex',{exact:true}).waitFor();
+  assert.equal(await alex.locator('#amount').textContent(),'$32.00');
+  await alex.getByText('PayPal Sandbox is not configured yet.',{exact:true}).waitFor();
+  db.prepare("UPDATE sessions SET expires_ms=? WHERE user_id='user-alex'").run(Date.now()-1);
+  await jimmy.waitForURL(base+'/login');
+  assert.deepEqual(errors,[]);
+  console.log('UI checks passed: desktop/mobile login, three organizers, confirmation permissions, forged localStorage, password-verified switching, session-expiry redirect and payment page identities.');
+  console.log('Screenshots:',directory);
+}finally{
+  await browser?.close();await new Promise(resolve=>server.close(resolve));db.close();
+}
