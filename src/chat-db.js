@@ -1,79 +1,52 @@
 import { randomUUID } from 'node:crypto';
-import { db, queries } from './db.js';
-
-export const allowedActors = ['You', 'Alex', 'Sarah'];
-const threads = [
-  { id: 'weekend-crew', name: 'Weekend crew', initials: 'WC', color: '#d6efdf', subtitle: 'You, Alex, Sarah', emoji: '🍽️' },
-  { id: 'roommates', name: 'Roommates', initials: 'RM', color: '#fce9ca', subtitle: 'You, Alex, Sarah', emoji: '🏠' }
-];
-db.exec(`
-  CREATE TABLE IF NOT EXISTS chat_messages (
-    id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    text TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL DEFAULT 'text',
-    expense_id TEXT,
-    created_ms INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_time ON chat_messages(thread_id, created_ms);
-  CREATE TABLE IF NOT EXISTS chat_expenses (
-    expense_id TEXT PRIMARY KEY REFERENCES expenses(id),
-    thread_id TEXT NOT NULL
-  );
-`);
-const findThread = threadId => threads.find(t => t.id === threadId) || null;
-const rowCount = db.prepare('SELECT COUNT(*) as n FROM chat_messages').get().n;
-if (!rowCount) {
-  const now = Date.now() - 22 * 60 * 1000;
-  const demoMessages = [
-    ['weekend-crew', 'Sarah', 'Dinner was so good last night 🍜', 0],
-    ['weekend-crew', 'Alex', 'Thanks for covering it! How much do we owe?', 60_000],
-    ['weekend-crew', 'You', 'I can split the bill here with SplitMate 💚', 120_000],
-    ['roommates', 'Alex', 'Can we settle the utilities this weekend?', 240_000],
-    ['roommates', 'Sarah', 'Works for me!', 300_000]
-  ];
-  const stmt = db.prepare('INSERT INTO chat_messages(id,thread_id,sender,text,kind,expense_id,created_ms) VALUES(?,?,?,?,?,?,?)');
-  db.transaction(() => demoMessages.forEach(([thread,sender,msg,offset]) => stmt.run(randomUUID(),thread,sender,msg,'text',null,now+offset)))();
+import { db, queries, publicUser } from './db.js';
+export function members(threadId) {
+  return db.prepare('SELECT u.* FROM group_members m JOIN users u ON u.id=m.user_id WHERE m.thread_id=? ORDER BY u.rowid').all(threadId);
 }
-export function addMessage(threadId, sender, text, kind = 'text', expenseId = null) {
-  if (!findThread(threadId)) throw new Error('Unknown chat');
+export function isMember(threadId, userId) {
+  return Boolean(db.prepare('SELECT 1 FROM group_members WHERE thread_id=? AND user_id=?').get(threadId, userId));
+}
+export function getThread(id) { return db.prepare('SELECT * FROM chat_groups WHERE id=?').get(id); }
+export function listThreads(userId) {
+  return db.prepare('SELECT g.* FROM chat_groups g JOIN group_members m ON m.thread_id=g.id WHERE m.user_id=? ORDER BY g.rowid').all(userId)
+    .map(group => ({ ...group, members: members(group.id).map(publicUser), subtitle: members(group.id).map(user => user.display_name).join(', ') }));
+}
+if (!db.prepare('SELECT 1 FROM chat_messages LIMIT 1').get()) {
+  const now = Date.now() - 22 * 60 * 1000;
+  db.transaction(() => {
+    [['weekend-crew','Sarah','Dinner was so good last night 🍜'], ['weekend-crew','Alex','Thanks for covering it! How much do we owe?'],
+      ['weekend-crew','Jimmy','I can split the bill here with SplitMate 💚'], ['roommates','Alex','Can we settle the utilities this weekend?'],
+      ['roommates','Sarah','Works for me!']].forEach(([thread,sender,text], index) => {
+      const user = queries.userByName(sender);
+      db.prepare('INSERT INTO chat_messages(id,thread_id,sender,sender_user_id,text,created_ms) VALUES(?,?,?,?,?,?)')
+        .run(randomUUID(),thread,sender,user.id,text,now + index * 60_000);
+    });
+  })();
+}
+export function addMessage(threadId, sender, text, kind = 'text', expenseId = null, senderId = null) {
+  if (!getThread(threadId)) throw new Error('Unknown chat');
   const id = randomUUID();
-  db.prepare('INSERT INTO chat_messages(id,thread_id,sender,text,kind,expense_id,created_ms) VALUES(?,?,?,?,?,?,?)')
-    .run(id,threadId,sender,String(text || '').slice(0,1500),kind,expenseId,Date.now());
+  db.prepare('INSERT INTO chat_messages(id,thread_id,sender,sender_user_id,text,kind,expense_id,created_ms) VALUES(?,?,?,?,?,?,?,?)')
+    .run(id,threadId,sender,senderId,String(text || '').slice(0,1500),kind,expenseId,Date.now());
   return id;
 }
-export function getThread(id) { return findThread(id); }
-export function listThreads() { return threads; }
-export function getMessages(threadId, limit = 120) {
-  if (!findThread(threadId)) return null;
-  
-  const rows = db.prepare(`SELECT *FROM (SELECT *
-    FROM chat_messages
-    WHERE thread_id = ?
-    ORDER BY created_ms DESC, id DESC
-    LIMIT ?)ORDER BY created_ms ASC, id ASC`).all(threadId, limit);
-
-  return rows.map(m => {
-    const result = { id:m.id, threadId:m.thread_id, sender:m.sender, text:m.text, kind:m.kind, createdAt:m.created_ms };
-    if (m.expense_id) {
-      const expense = queries.getExpense(m.expense_id);
-      if (expense) {
-        const names = [expense.organizer, ...JSON.parse(expense.owed_names_json)];
-        const shareRows = queries.shares(expense.id);
-        result.expense = {
-          id: expense.id, organizer:expense.organizer, description:expense.description,
-          totalCents:expense.total_cents, status:expense.status,
-          names, shares: shareRows.map(s=>({person:s.person,amountCents:s.amount_cents,status:s.status,token:s.token}))
-        };
-      }
+export function getMessages(threadId, viewerId, limit = 120) {
+  if (!isMember(threadId, viewerId)) return null;
+  const rows = db.prepare(`SELECT * FROM (SELECT rowid sequence,* FROM chat_messages WHERE thread_id=?
+    ORDER BY created_ms DESC,rowid DESC LIMIT ?) ORDER BY created_ms ASC,sequence ASC`).all(threadId, limit);
+  return rows.map(message => {
+    const result = { id:message.id, threadId:message.thread_id, sender:message.sender, senderId:message.sender_user_id,
+      text:message.text, kind:message.kind, createdAt:message.created_ms };
+    if (message.expense_id) {
+      const expense = queries.getExpense(message.expense_id);
+      if (expense) result.expense = {
+        id:expense.id, organizer:expense.organizer, organizerId:expense.organizer_user_id, description:expense.description,
+        totalCents:expense.total_cents, status:expense.status, names:[expense.organizer, ...JSON.parse(expense.owed_names_json)],
+        shares:queries.shares(expense.id).map(share => ({ person:share.person, personId:share.person_user_id, amountCents:share.amount_cents,
+          status:share.status, token: viewerId === share.person_user_id || viewerId === expense.organizer_user_id ? share.token : null }))
+      };
     }
     return result;
   });
 }
-export function linkExpense(expenseId,threadId) {
-  db.prepare('INSERT INTO chat_expenses (expense_id,thread_id) VALUES (?,?)').run(expenseId,threadId);
-}
-export function threadForExpense(expenseId) {
-  return db.prepare('SELECT thread_id FROM chat_expenses WHERE expense_id=?').get(expenseId)?.thread_id || null;
-}
+export function threadForExpense(id) { return db.prepare('SELECT thread_id FROM chat_expenses WHERE expense_id=?').get(id)?.thread_id || null; }

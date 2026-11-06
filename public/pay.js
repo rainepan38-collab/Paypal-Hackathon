@@ -1,9 +1,11 @@
 const token = location.pathname.split('/').filter(Boolean).at(-1);
+let csrfToken;
 const $ = id => document.getElementById(id);
 function say(message) { $('message').textContent = message; }
 async function requestJson(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json' } });
+  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(csrfToken ? {'X-CSRF-Token':csrfToken} : {}) }, cache:'no-store' });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) location.replace(`/login?next=${encodeURIComponent(location.pathname)}`);
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
 }
@@ -15,12 +17,18 @@ async function waitForPayPal() {
   throw new Error('PayPal v6 SDK did not load. Check your internet connection.');
 }
 async function main() {
+  const auth = await requestJson('/api/auth/session');
+  if (!auth.user) { location.replace(`/login?next=${encodeURIComponent(location.pathname)}`); return; }
+  csrfToken = auth.csrfToken;
+  $('account').textContent = auth.user.name;
   const details = await requestJson(`/api/pay/${encodeURIComponent(token)}`);
   $('description').textContent = details.description;
   $('person').textContent = details.person;
+  $('organizer').textContent = details.organizer;
   $('amount').textContent = details.amount;
   $('state').textContent = details.status.toUpperCase();
   if (details.status === 'paid') { say('✅ This share has already been paid.'); return; }
+  if (!details.canPay) { say(`Sign out from chats and log in as ${details.person} to pay. You can reshare this link with them.`); return; }
   if (!details.clientId) { say('PayPal Sandbox is not configured yet.'); return; }
   await waitForPayPal();
   const sdk = await window.paypal.createInstance({ clientId: details.clientId, components: ['paypal-payments'], pageType: 'checkout' });
@@ -55,3 +63,6 @@ async function main() {
   say('Ready. Use a PayPal Sandbox personal test account at checkout.');
 }
 main().catch(error => { console.error(error); say(error.message); });
+
+window.addEventListener('storage',event=>{if(event.key==='splitmate-auth-change') location.reload();});
+window.addEventListener('pageshow',event=>{if(event.persisted) location.reload();});

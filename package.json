@@ -10,10 +10,16 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "accounts": "node scripts/accounts.js",
+    "db:backup": "node scripts/db-admin.js backup",
+    "db:migrate": "node scripts/db-admin.js migrate",
+    "check": "node scripts/check.js",
+    "test:live": "node scripts/live-check.js"
   },
   "dependencies": {
     "@google/genai": "^2.32.0",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.2.0",
     "dotenv": "^17.2.2",
     "express": "^5.1.0"
