@@ -136,7 +136,26 @@ async function init(){
   const dialog=$('infoDialog');$('infoBtn').onclick=()=>dialog.showModal();$('closeInfo').onclick=()=>dialog.close();$('gotIt').onclick=()=>dialog.close();
   try {const config=await api('/api/config');$('modeLabel').textContent=config.aiEnabled?'✦ Gemini enabled.':'Rule-based demo · add API key for AI';}catch{}
   setThread(state.thread,false);
-  setInterval(()=>{if(document.visibilityState==='visible')refresh().catch(()=>{});},2500);
+  
+let refreshInProgress = false;
+
+setInterval(async () => {
+  if (
+    document.visibilityState !== 'visible' ||
+    refreshInProgress
+  ) return;
+
+  refreshInProgress = true;
+
+  try {
+    await refresh();
+  } catch (error) {
+    console.warn("Chat refresh failed:", error.message);
+  } finally {
+    refreshInProgress = false;
+  }
+}, 15000);
+
   if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
 }
 init().catch(error=>{console.error(error);toast(`Could not load app: ${error.message}`);});
